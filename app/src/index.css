@@ -1,0 +1,57 @@
+:root {
+  --bg-app: #f6f4ef;
+  --bg-panel: #fbfaf7;
+  --bg-surface: #ffffff;
+  --text-primary: #2f2a24;
+  --text-secondary: #6b6258;
+  --text-muted: #8b8175;
+  --border-soft: #ddd6cb;
+  --border-strong: #cfc5b8;
+  --selection-blue: #4c8dff;
+  --warning-red: #e36d6d;
+  --session-red: #f7c9c4;
+  --session-orange: #f6d7b8;
+  --session-yellow: #f4e7a8;
+  --session-green: #cfe7c8;
+  --session-blue: #c9dcf6;
+  --shadow-panel: 0 8px 20px rgba(33, 27, 21, 0.08);
+  --shadow-memo: 0 10px 24px rgba(62, 45, 29, 0.1);
+  --shadow-memo-active: 0 14px 30px rgba(62, 45, 29, 0.18);
+  --radius-memo: 18px;
+  --radius-panel: 20px;
+  color: var(--text-primary);
+  background: var(--bg-app);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 28%),
+    linear-gradient(180deg, #f6f4ef 0%, #efe9df 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
