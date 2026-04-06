@@ -74,21 +74,21 @@
 ## 3.1 メモ状態
 - `idle`
   - 非選択状態
-- `session_selected`
-  - 1回目クリックで入る
-  - セッション全体が選択状態
 - `memo_selected`
-  - 同一メモへの再選択で入る
+  - シングルクリックで入る
   - 個別メモだけ選択状態
+- `session_selected`
+  - 右クリックメニューの `このセッションを選択` で入る
+  - セッション全体が選択状態
 - `editing`
-  - `Enter` または再操作で入る
+  - `Enter` またはダブルクリックで入る
   - 文字入力可能
 - `delete_confirm`
   - `Delete` で入る
   - `Delete` または `Enter` で削除確定
   - `Esc` で戻る
 - `closed`
-  - `Cmd+W` または `Cmd+Enter` または自動閉じるで入る
+  - `Cmd+Enter` または自動閉じるで入る
   - デスクトップ上は非表示
   - 管理画面から再表示可能
 - `trashed`
@@ -96,14 +96,13 @@
   - ゴミ箱へ移動
 
 ## 3.2 状態遷移の要約
-- `idle -> session_selected`: クリック
-- `session_selected -> memo_selected`: 同一メモ再選択
-- `memo_selected -> editing`: `Enter` または再操作
+- `idle -> memo_selected`: シングルクリック
+- `idle -> session_selected`: 右クリック → `このセッションを選択`
+- `session_selected -> memo_selected`: 同一セッション内メモをシングルクリック
+- `memo_selected -> editing`: `Enter` またはダブルクリック
 - `session_selected -> delete_confirm`: `Delete`
 - `memo_selected -> delete_confirm`: `Delete`
 - `editing -> closed`: `Cmd+Enter`
-- `session_selected -> closed`: `Cmd+W`
-- `memo_selected -> closed`: `Cmd+W`
 - `delete_confirm -> trashed`: `Delete` / `Enter`
 - `delete_confirm -> session_selected or memo_selected`: `Esc`
 
@@ -134,9 +133,8 @@ CREATE TABLE memos (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   last_edited_at TEXT NOT NULL,
-  x REAL,
-  y REAL,
   is_open INTEGER NOT NULL DEFAULT 1,
+  is_dirty INTEGER NOT NULL DEFAULT 1,
   trashed_at TEXT,
   FOREIGN KEY (session_id) REFERENCES sessions(id)
 );
@@ -153,6 +151,10 @@ CREATE TABLE settings (
 - `session_id` がセッション所属の唯一の基準
 - セッション移動は `memos.session_id` の更新で実現する
 - セッション内メモが0件になった場合、そのセッションは削除またはゴミ箱扱いとする
+- 管理画面には `content != ''` のメモのみ表示する
+- 保存処理には明示保存と autosave の両方を含み、どちらも `title` を本文先頭10文字から再生成する
+- 使用中 `color_slot` の取得は `sessions.is_open = 1` のものだけを対象にする
+- アプリ起動時は `sessions.is_open = 0` と `memos.is_open = 0` に全件リセットした後、空メモと空セッションを削除する
 - ゴミ箱は `trashed_at IS NOT NULL` で判定可能
 - 完全削除は別途物理削除処理で対応する
 
