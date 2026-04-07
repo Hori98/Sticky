@@ -1,5 +1,7 @@
 #[cfg(desktop)]
 use tauri::{Emitter, Manager};
+#[cfg(desktop)]
+use tauri::{LogicalPosition, LogicalSize};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -71,7 +73,20 @@ pub fn run() {
                     window.set_shadow(false)?;
                     window.set_visible_on_all_workspaces(true)?;
                     window.set_skip_taskbar(true)?;
-                    window.set_fullscreen(true)?;
+
+                    if let Some(monitor) = window.current_monitor()? {
+                        let size = monitor.size();
+                        let position = monitor.position();
+                        window.set_position(LogicalPosition::new(
+                            f64::from(position.x),
+                            f64::from(position.y),
+                        ))?;
+                        window.set_size(LogicalSize::new(
+                            f64::from(size.width),
+                            f64::from(size.height),
+                        ))?;
+                    }
+
                     window.set_focus()?;
 
                     app.global_shortcut().register(toggle_overlay)?;
