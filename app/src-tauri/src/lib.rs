@@ -1,15 +1,13 @@
 #[cfg(desktop)]
 use tauri::{Emitter, Manager};
 #[cfg(desktop)]
-use tauri::{LogicalPosition, LogicalSize};
+use tauri::{PhysicalPosition, PhysicalSize};
 #[cfg(desktop)]
 use serde::Serialize;
 
 #[cfg(desktop)]
 #[derive(Clone, Copy, Serialize)]
-struct MultiOpenPayload {
-    count: u8,
-}
+struct PickerOpenPayload;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,26 +17,18 @@ pub fn run() {
     };
 
     let open_single_session =
-        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit1);
-    let open_multi_sessions = [
-        (2u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit2)),
-        (3u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit3)),
-        (4u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit4)),
-        (5u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit5)),
-        (6u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit6)),
-        (7u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit7)),
-        (8u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit8)),
-        (9u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit9)),
-    ];
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::ALT), Code::Enter);
+    let open_session_picker =
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::ALT), Code::KeyN);
     let toggle_clickthrough =
-        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit0);
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::ALT), Code::Slash);
 
     tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler({
                     let open_single_session = open_single_session.clone();
-                    let open_multi_sessions = open_multi_sessions.clone();
+                    let open_session_picker = open_session_picker.clone();
                     let toggle_clickthrough = toggle_clickthrough.clone();
                     move |app, shortcut, event| {
                         if event.state() != ShortcutState::Pressed {
@@ -56,16 +46,11 @@ pub fn run() {
                             return;
                         }
 
-                        for (count, multi_shortcut) in &open_multi_sessions {
-                            if shortcut == multi_shortcut {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                                let _ = app.emit(
-                                    "session://open-multi",
-                                    MultiOpenPayload { count: *count },
-                                );
-                                return;
-                            }
+                        if shortcut == &open_session_picker {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = app.emit("session://open-picker", PickerOpenPayload);
+                            return;
                         }
 
                         #[cfg(debug_assertions)]
@@ -84,7 +69,7 @@ pub fn run() {
         )
         .setup({
             let open_single_session = open_single_session.clone();
-            let open_multi_sessions = open_multi_sessions.clone();
+            let open_session_picker = open_session_picker.clone();
             let toggle_clickthrough = toggle_clickthrough.clone();
             move |app| {
                 #[cfg(desktop)]
@@ -104,22 +89,20 @@ pub fn run() {
                     if let Some(monitor) = window.current_monitor()? {
                         let size = monitor.size();
                         let position = monitor.position();
-                        window.set_position(LogicalPosition::new(
-                            f64::from(position.x),
-                            f64::from(position.y),
+                        window.set_position(PhysicalPosition::new(
+                            position.x,
+                            position.y,
                         ))?;
-                        window.set_size(LogicalSize::new(
-                            f64::from(size.width),
-                            f64::from(size.height),
+                        window.set_size(PhysicalSize::new(
+                            size.width,
+                            size.height,
                         ))?;
                     }
 
                     window.set_focus()?;
 
                     app.global_shortcut().register(open_single_session)?;
-                    for (_, shortcut) in &open_multi_sessions {
-                        app.global_shortcut().register(shortcut.clone())?;
-                    }
+                    app.global_shortcut().register(open_session_picker)?;
                     #[cfg(debug_assertions)]
                     app.global_shortcut().register(toggle_clickthrough)?;
                 }
