@@ -36,13 +36,17 @@ type ResizeInteraction = {
 type Interaction = DragInteraction | ResizeInteraction
 
 function App() {
-  const [overlayVisible, setOverlayVisible] = useState(true)
   const [clickThrough, setClickThrough] = useState(false)
   const [uiState, setUiState] = useState<MemoUiState>('idle')
+  const [isVisible, setIsVisible] = useState(true)
   const [content, setContent] = useState(
     '思考をその場で退避する。ここから sticky の最小メモUIを組み立てる。',
   )
+  const [savedContent, setSavedContent] = useState(
+    '思考をその場で退避する。ここから sticky の最小メモUIを組み立てる。',
+  )
   const [isComposing, setIsComposing] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
   const [position, setPosition] = useState({ x: 72, y: 64 })
   const [size, setSize] = useState({ width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT })
 
@@ -55,12 +59,19 @@ function App() {
 
   useEffect(() => {
     const unlisten = Promise.all([
-      listen<boolean>('overlay://visibility', (event) => {
-        setOverlayVisible(event.payload)
+      listen<boolean>('session://open-single', (event) => {
+        if (event.payload) {
+          setIsVisible(true)
+          setUiState('idle')
+        }
       }),
-      listen<boolean>('overlay://clickthrough', (event) => {
-        setClickThrough(event.payload)
-      }),
+      ...(import.meta.env.DEV
+        ? [
+            listen<boolean>('overlay://clickthrough', (event) => {
+              setClickThrough(event.payload)
+            }),
+          ]
+        : []),
     ])
 
     return () => {
@@ -85,6 +96,10 @@ function App() {
   useEffect(() => {
     draftContentRef.current = content
   }, [content])
+
+  useEffect(() => {
+    setIsDirty(content !== savedContent)
+  }, [content, savedContent])
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -167,11 +182,36 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (!overlayVisible) {
+      if (!isVisible) {
         return
       }
 
+      const isSaveShortcut = event.metaKey && event.key.toLowerCase() === 's'
+      const isCommitShortcut = event.metaKey && event.key === 'Enter'
+
+      const saveCurrentContent = () => {
+        const nextValue = editorRef.current?.value ?? draftContentRef.current
+        draftContentRef.current = nextValue
+        setContent(nextValue)
+        setSavedContent(nextValue)
+        setIsDirty(false)
+      }
+
       if (uiState === 'editing') {
+        if (isSaveShortcut) {
+          event.preventDefault()
+          saveCurrentContent()
+          return
+        }
+
+        if (isCommitShortcut) {
+          event.preventDefault()
+          saveCurrentContent()
+          setIsVisible(false)
+          setUiState('idle')
+          return
+        }
+
         if (event.key === 'Escape') {
           event.preventDefault()
           const nextValue = editorRef.current?.value ?? draftContentRef.current
@@ -184,6 +224,26 @@ function App() {
       }
 
       if (isComposing) {
+        return
+      }
+
+      if (isSaveShortcut) {
+        event.preventDefault()
+        const nextValue = draftContentRef.current
+        setContent(nextValue)
+        setSavedContent(nextValue)
+        setIsDirty(false)
+        return
+      }
+
+      if (isCommitShortcut && uiState === 'memo_selected') {
+        event.preventDefault()
+        const nextValue = draftContentRef.current
+        setContent(nextValue)
+        setSavedContent(nextValue)
+        setIsDirty(false)
+        setIsVisible(false)
+        setUiState('idle')
         return
       }
 
@@ -201,7 +261,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isComposing, overlayVisible, uiState])
+  }, [isComposing, isVisible, uiState])
 
   const handlePointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (uiState === 'editing') {
@@ -242,8 +302,18 @@ function App() {
     setUiState('editing')
   }
 
+  const commitEditorValue = () => {
+    const nextValue = editorRef.current?.value ?? draftContentRef.current
+    draftContentRef.current = nextValue
+    setContent(nextValue)
+  }
+
   const handleShellPointerDown = (event: React.PointerEvent<HTMLElement>) => {
     if (!cardRef.current?.contains(event.target as Node)) {
+      if (uiState === 'editing') {
+        commitEditorValue()
+      }
+
       setUiState('idle')
     }
   }
@@ -269,18 +339,12 @@ function App() {
       }
     }
 
-  const commitEditorValue = () => {
-    const nextValue = editorRef.current?.value ?? draftContentRef.current
-    draftContentRef.current = nextValue
-    setContent(nextValue)
-  }
-
   const isSelected = uiState === 'memo_selected' || uiState === 'editing'
   const isEditing = uiState === 'editing'
 
   return (
     <main className="overlay-shell" onPointerDown={handleShellPointerDown}>
-      {overlayVisible ? (
+      {isVisible ? (
         <>
           <article
             ref={cardRef}
@@ -301,6 +365,8 @@ function App() {
               <span className="memo-card__status">
                 {isEditing
                   ? 'editing'
+                  : isDirty
+                    ? 'dirty'
                   : clickThrough
                     ? 'click-through on'
                     : uiState === 'memo_selected'
@@ -318,14 +384,18 @@ function App() {
                   defaultValue={content}
                   onChange={(event) => {
                     if (!isComposing) {
-                      draftContentRef.current = event.currentTarget.value
+                      const nextValue = event.currentTarget.value
+                      draftContentRef.current = nextValue
+                      setIsDirty(nextValue !== savedContent)
                     }
                   }}
                   onClick={(event) => event.stopPropagation()}
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={(event) => {
                     setIsComposing(false)
-                    draftContentRef.current = event.currentTarget.value
+                    const nextValue = event.currentTarget.value
+                    draftContentRef.current = nextValue
+                    setIsDirty(nextValue !== savedContent)
                   }}
                   onBlur={commitEditorValue}
                 />
@@ -336,7 +406,7 @@ function App() {
 
             <footer className="memo-card__footer">
               <span>click: select / double click: edit</span>
-              <span>drag: move / corner drag: resize</span>
+              <span>Cmd + S: save / Cmd + Enter: save and close</span>
             </footer>
 
             {isSelected ? (
@@ -365,10 +435,12 @@ function App() {
             ) : null}
           </article>
 
-          <aside className="runtime-badge">
-            <span className="runtime-badge__dot" />
-            <span>{clickThrough ? 'through' : 'overlay'}</span>
-          </aside>
+          {import.meta.env.DEV ? (
+            <aside className="runtime-badge">
+              <span className="runtime-badge__dot" />
+              <span>{clickThrough ? 'through' : 'overlay'}</span>
+            </aside>
+          ) : null}
         </>
       ) : null}
     </main>

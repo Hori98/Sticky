@@ -10,7 +10,8 @@ pub fn run() {
         Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState,
     };
 
-    let toggle_overlay = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit1);
+    let open_single_session =
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit1);
     let toggle_clickthrough =
         Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit2);
 
@@ -18,7 +19,7 @@ pub fn run() {
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler({
-                    let toggle_overlay = toggle_overlay.clone();
+                    let open_single_session = open_single_session.clone();
                     let toggle_clickthrough = toggle_clickthrough.clone();
                     move |app, shortcut, event| {
                         if event.state() != ShortcutState::Pressed {
@@ -29,20 +30,13 @@ pub fn run() {
                             return;
                         };
 
-                        if shortcut == &toggle_overlay {
-                            let visible = window.is_visible().unwrap_or(false);
-                            let next = !visible;
-
-                            if next {
-                                let _ = window.show();
-                                let _ = window.set_focus();
-                            } else {
-                                let _ = window.hide();
-                            }
-
-                            let _ = app.emit("overlay://visibility", next);
+                        if shortcut == &open_single_session {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = app.emit("session://open-single", true);
                         }
 
+                        #[cfg(debug_assertions)]
                         if shortcut == &toggle_clickthrough {
                             let enabled = window
                                 .state::<OverlayState>()
@@ -57,7 +51,7 @@ pub fn run() {
                 .build(),
         )
         .setup({
-            let toggle_overlay = toggle_overlay.clone();
+            let open_single_session = open_single_session.clone();
             let toggle_clickthrough = toggle_clickthrough.clone();
             move |app| {
                 #[cfg(desktop)]
@@ -89,7 +83,8 @@ pub fn run() {
 
                     window.set_focus()?;
 
-                    app.global_shortcut().register(toggle_overlay)?;
+                    app.global_shortcut().register(open_single_session)?;
+                    #[cfg(debug_assertions)]
                     app.global_shortcut().register(toggle_clickthrough)?;
                 }
 
