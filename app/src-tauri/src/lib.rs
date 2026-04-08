@@ -2,6 +2,14 @@
 use tauri::{Emitter, Manager};
 #[cfg(desktop)]
 use tauri::{LogicalPosition, LogicalSize};
+#[cfg(desktop)]
+use serde::Serialize;
+
+#[cfg(desktop)]
+#[derive(Clone, Copy, Serialize)]
+struct MultiOpenPayload {
+    count: u8,
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -12,14 +20,25 @@ pub fn run() {
 
     let open_single_session =
         Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit1);
+    let open_multi_sessions = [
+        (2u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit2)),
+        (3u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit3)),
+        (4u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit4)),
+        (5u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit5)),
+        (6u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit6)),
+        (7u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit7)),
+        (8u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit8)),
+        (9u8, Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit9)),
+    ];
     let toggle_clickthrough =
-        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit2);
+        Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Digit0);
 
     tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler({
                     let open_single_session = open_single_session.clone();
+                    let open_multi_sessions = open_multi_sessions.clone();
                     let toggle_clickthrough = toggle_clickthrough.clone();
                     move |app, shortcut, event| {
                         if event.state() != ShortcutState::Pressed {
@@ -34,6 +53,19 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                             let _ = app.emit("session://open-single", true);
+                            return;
+                        }
+
+                        for (count, multi_shortcut) in &open_multi_sessions {
+                            if shortcut == multi_shortcut {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                                let _ = app.emit(
+                                    "session://open-multi",
+                                    MultiOpenPayload { count: *count },
+                                );
+                                return;
+                            }
                         }
 
                         #[cfg(debug_assertions)]
@@ -52,6 +84,7 @@ pub fn run() {
         )
         .setup({
             let open_single_session = open_single_session.clone();
+            let open_multi_sessions = open_multi_sessions.clone();
             let toggle_clickthrough = toggle_clickthrough.clone();
             move |app| {
                 #[cfg(desktop)]
@@ -84,6 +117,9 @@ pub fn run() {
                     window.set_focus()?;
 
                     app.global_shortcut().register(open_single_session)?;
+                    for (_, shortcut) in &open_multi_sessions {
+                        app.global_shortcut().register(shortcut.clone())?;
+                    }
                     #[cfg(debug_assertions)]
                     app.global_shortcut().register(toggle_clickthrough)?;
                 }
