@@ -20,22 +20,25 @@ const SESSION_COLOR_VARS = [
   'var(--session-blue)',
 ]
 
+// x: 5列を画面中央に配置（240px刻み、カード幅320pxと80px重なる設計）
+// 1440px基準: 左端80px余白、右端80px余白、グリッド幅1280px
+// y: 3段、行間243px（カード高240px、ほぼ隙間なし）
 const SLOT_PERCENTAGES = [
-  { x: 0.1, y: 0.18 },
-  { x: 0.3, y: 0.18 },
-  { x: 0.5, y: 0.18 },
-  { x: 0.7, y: 0.18 },
-  { x: 0.9, y: 0.18 },
-  { x: 0.1, y: 0.43 },
-  { x: 0.3, y: 0.43 },
-  { x: 0.5, y: 0.43 },
-  { x: 0.7, y: 0.43 },
-  { x: 0.9, y: 0.43 },
-  { x: 0.1, y: 0.68 },
-  { x: 0.3, y: 0.68 },
-  { x: 0.5, y: 0.68 },
-  { x: 0.7, y: 0.68 },
-  { x: 0.9, y: 0.68 },
+  { x: 0.17, y: 0.20 },
+  { x: 0.33, y: 0.20 },
+  { x: 0.50, y: 0.20 },
+  { x: 0.67, y: 0.20 },
+  { x: 0.83, y: 0.20 },
+  { x: 0.17, y: 0.47 },
+  { x: 0.33, y: 0.47 },
+  { x: 0.50, y: 0.47 },
+  { x: 0.67, y: 0.47 },
+  { x: 0.83, y: 0.47 },
+  { x: 0.17, y: 0.74 },
+  { x: 0.33, y: 0.74 },
+  { x: 0.50, y: 0.74 },
+  { x: 0.67, y: 0.74 },
+  { x: 0.83, y: 0.74 },
 ]
 
 type MemoUiState = 'idle' | 'memo_selected' | 'editing'
@@ -61,10 +64,6 @@ type Session = {
   isOpen: boolean
   selectionState: SessionSelectionState
   memos: Memo[]
-}
-
-type MultiOpenPayload = {
-  count: number
 }
 
 type DragInteraction = {
@@ -109,12 +108,12 @@ function getViewportSize() {
 }
 
 function getSlotPosition(slotIndex: number) {
-  const viewport = getViewportSize()
+  const { width, height } = getViewportSize()
   const slot = SLOT_PERCENTAGES[slotIndex] ?? SLOT_PERCENTAGES[0]
 
   return {
-    x: Math.round(viewport.width * slot.x - DEFAULT_WIDTH / 2),
-    y: Math.round(viewport.height * slot.y - DEFAULT_HEIGHT / 2),
+    x: Math.round(Math.max(0, Math.min(width - DEFAULT_WIDTH, width * slot.x - DEFAULT_WIDTH / 2))),
+    y: Math.round(Math.max(0, Math.min(height - DEFAULT_HEIGHT, height * slot.y - DEFAULT_HEIGHT / 2))),
   }
 }
 
@@ -166,9 +165,7 @@ function clearSelections(sessions: Session[]) {
   return sessions.map((session) => ({
     ...session,
     selectionState: 'idle' as SessionSelectionState,
-    memos: session.memos.map((memo) =>
-      memo.uiState === 'editing' ? memo : { ...memo, uiState: 'idle' as MemoUiState },
-    ),
+    memos: session.memos.map((memo) => ({ ...memo, uiState: 'idle' as MemoUiState })),
   }))
 }
 
@@ -176,6 +173,9 @@ function App() {
   const [clickThrough, setClickThrough] = useState(false)
   const [sessions, setSessions] = useState<Session[]>([])
   const [isComposing, setIsComposing] = useState(false)
+  const [isSessionPickerVisible, setIsSessionPickerVisible] = useState(false)
+  const [limitWarning, setLimitWarning] = useState<'session' | 'memo' | null>(null)
+  const limitWarningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const idCounterRef = useRef({ session: 1, memo: 1 })
   const editorRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
@@ -183,8 +183,20 @@ function App() {
   const dragExceededRef = useRef(false)
   const draftContentRef = useRef<Record<string, string>>({})
   const cardRefs = useRef<Record<string, HTMLElement | null>>({})
+  const sessionPickerRef = useRef<HTMLDivElement | null>(null)
 
   const getMemoIdentity = (sessionId: string, memoId: string) => `${sessionId}:${memoId}`
+
+  const triggerLimitWarning = (kind: 'session' | 'memo') => {
+    if (limitWarningTimerRef.current !== null) {
+      clearTimeout(limitWarningTimerRef.current)
+    }
+    setLimitWarning(kind)
+    limitWarningTimerRef.current = setTimeout(() => {
+      setLimitWarning(null)
+      limitWarningTimerRef.current = null
+    }, 900)
+  }
 
   const createMemo = (slotIndex: number, selected = false): Memo => {
     const memoId = nextId('memo', idCounterRef.current.memo++)
@@ -204,37 +216,44 @@ function App() {
     }
   }
 
-  const createSession = (memoCount: number, previousSessions: Session[]) => {
-    if (memoCount < 1 || memoCount > 9) {
+  const createSession = (
+    memoCount: number,
+    previousSessions: Session[],
+  ): { session: Session; limitHit: null } | { session: null; limitHit: 'session' | 'memo' } | null => {
+    if (memoCount < 1) {
       return null
     }
 
     const openSessionCount = getOpenSessions(previousSessions).length
     const openMemoCount = getOpenMemos(previousSessions).length
 
-    if (
-      openSessionCount + 1 > MAX_OPEN_SESSIONS ||
-      openMemoCount + memoCount > MAX_OPEN_MEMOS
-    ) {
-      return null
+    if (openSessionCount + 1 > MAX_OPEN_SESSIONS) {
+      return { session: null, limitHit: 'session' }
+    }
+
+    if (openMemoCount + memoCount > MAX_OPEN_MEMOS) {
+      return { session: null, limitHit: 'memo' }
     }
 
     const colorSlot = findUnusedColorSlot(previousSessions)
     const slotIndices = findAvailableSlotIndices(previousSessions, memoCount)
 
     if (colorSlot === null || slotIndices === null) {
-      return null
+      return { session: null, limitHit: 'memo' }
     }
 
     const sessionId = nextId('session', idCounterRef.current.session++)
 
     return {
-      id: sessionId,
-      colorSlot,
-      isOpen: true,
-      selectionState: 'idle' as SessionSelectionState,
-      memos: slotIndices.map((slotIndex, index) => createMemo(slotIndex, index === 0)),
-    } satisfies Session
+      session: {
+        id: sessionId,
+        colorSlot,
+        isOpen: true,
+        selectionState: 'idle' as SessionSelectionState,
+        memos: slotIndices.map((slotIndex, index) => createMemo(slotIndex, index === 0)),
+      } satisfies Session,
+      limitHit: null,
+    }
   }
 
   const getEditingMemo = (currentSessions: Session[]) => {
@@ -314,31 +333,22 @@ function App() {
 
   useEffect(() => {
     const unlisten = Promise.all([
-      listen<boolean>('session://open-single', (event) => {
-        if (!event.payload) {
-          return
-        }
-
+      listen('session://open-single', () => {
+        setIsSessionPickerVisible(false)
         setSessions((currentSessions) => {
           const nextSessions = clearSelections(currentSessions)
-          const created = createSession(1, nextSessions)
+          const result = createSession(1, nextSessions)
 
-          return created ? [...nextSessions, created] : nextSessions
+          if (!result) return nextSessions
+          if (result.limitHit) {
+            triggerLimitWarning(result.limitHit)
+            return nextSessions
+          }
+          return [...nextSessions, result.session]
         })
       }),
-      listen<MultiOpenPayload>('session://open-multi', (event) => {
-        const memoCount = Number(event.payload.count)
-
-        if (!Number.isInteger(memoCount) || memoCount < 2 || memoCount > 9) {
-          return
-        }
-
-        setSessions((currentSessions) => {
-          const nextSessions = clearSelections(currentSessions)
-          const created = createSession(memoCount, nextSessions)
-
-          return created ? [...nextSessions, created] : nextSessions
-        })
+      listen('session://open-picker', () => {
+        setIsSessionPickerVisible(true)
       }),
       ...(import.meta.env.DEV
         ? [
@@ -509,10 +519,49 @@ function App() {
       const isSaveShortcut = event.metaKey && event.key.toLowerCase() === 's'
       const isCommitShortcut = event.metaKey && event.key === 'Enter'
 
+      if (isSessionPickerVisible && !editingEntry) {
+        if (event.key === 'Escape' || event.key === 'Delete') {
+          event.preventDefault()
+          setIsSessionPickerVisible(false)
+          return
+        }
+
+        if (/^[1-9]$/.test(event.key)) {
+          event.preventDefault()
+          const memoCount = Number(event.key)
+
+          setSessions((currentSessions) => {
+            const nextSessions = clearSelections(currentSessions)
+            const result = createSession(memoCount, nextSessions)
+
+            if (!result) return nextSessions
+            if (result.limitHit) {
+              triggerLimitWarning(result.limitHit)
+              return nextSessions
+            }
+            return [...nextSessions, result.session]
+          })
+          setIsSessionPickerVisible(false)
+          return
+        }
+      }
+
       if (editingEntry) {
         if (isSaveShortcut) {
           event.preventDefault()
           saveMemo(editingEntry.session.id, editingEntry.memo.id)
+          setSessions((currentSessions) =>
+            currentSessions.map((session) =>
+              session.id !== editingEntry.session.id
+                ? session
+                : {
+                    ...session,
+                    memos: session.memos.map((memo) =>
+                      memo.id !== editingEntry.memo.id ? memo : { ...memo, uiState: 'idle' },
+                    ),
+                  },
+            ),
+          )
           return
         }
 
@@ -572,6 +621,7 @@ function App() {
       if (selectedEntry && isSaveShortcut) {
         event.preventDefault()
         saveMemo(selectedEntry.session.id, selectedEntry.memo.id)
+        setSessions((currentSessions) => clearSelections(currentSessions))
         return
       }
 
@@ -629,7 +679,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isComposing, sessions])
+  }, [isComposing, sessions, isSessionPickerVisible])
 
   const handleMemoPointerDown =
     (sessionId: string, memoId: string) => (event: React.PointerEvent<HTMLElement>) => {
@@ -719,8 +769,9 @@ function App() {
     const clickedInsideMemo = Object.values(cardRefs.current).some((card) =>
       card?.contains(event.target as Node),
     )
+    const clickedInsidePicker = sessionPickerRef.current?.contains(event.target as Node) ?? false
 
-    if (clickedInsideMemo) {
+    if (clickedInsideMemo || clickedInsidePicker) {
       return
     }
 
@@ -730,6 +781,7 @@ function App() {
     }
 
     setSessions((currentSessions) => clearSelections(currentSessions))
+    setIsSessionPickerVisible(false)
   }
 
   const handleResizePointerDown =
@@ -794,7 +846,7 @@ function App() {
                   ref={(node) => {
                     cardRefs.current[getMemoIdentity(session.id, memo.id)] = node
                   }}
-                  className={`memo-card ${isSelected ? 'memo-card--selected' : ''} ${isEditing ? 'memo-card--editing' : ''}`}
+                  className={`memo-card ${isSelected ? 'memo-card--selected' : ''} ${isEditing ? 'memo-card--editing' : ''} ${limitWarning ? 'memo-card--limit-warning' : ''}`}
                   style={{
                     transform: `translate(${memo.position.x}px, ${memo.position.y}px)`,
                     width: `${memo.size.width}px`,
@@ -928,6 +980,50 @@ function App() {
               )
             }),
         )}
+
+      {limitWarning ? (
+        <p className="limit-warning-badge" aria-live="assertive">
+          {limitWarning === 'session' ? 'これ以上セッションは開けません' : 'これ以上メモは表示できません'}
+        </p>
+      ) : null}
+
+      {isSessionPickerVisible ? (
+        <div className="session-picker-layer">
+          <section ref={sessionPickerRef} className="session-picker">
+            <p className="session-picker__eyebrow">new session</p>
+            <h2 className="session-picker__title">何枚で始める？</h2>
+            <p className="session-picker__description">
+              1〜9 を押すと、その枚数の新規セッションを作成します。
+            </p>
+            <div className="session-picker__grid">
+              {Array.from({ length: 9 }, (_, index) => index + 1).map((count) => (
+                <button
+                  key={count}
+                  className="session-picker__button"
+                  type="button"
+                  onClick={() => {
+                    setSessions((currentSessions) => {
+                      const nextSessions = clearSelections(currentSessions)
+                      const result = createSession(count, nextSessions)
+
+                      if (!result) return nextSessions
+                      if (result.limitHit) {
+                        triggerLimitWarning(result.limitHit)
+                        return nextSessions
+                      }
+                      return [...nextSessions, result.session]
+                    })
+                    setIsSessionPickerVisible(false)
+                  }}
+                >
+                  <span className="session-picker__count">{count}</span>
+                  <span className="session-picker__label">notes</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {import.meta.env.DEV ? (
         <aside className="runtime-badge">
