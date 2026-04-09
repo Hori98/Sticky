@@ -79,17 +79,28 @@ type Selection =
 
 #### U-09: Pin 機能の実装と `p` キーバインドの修正
 
-現状バグ:
-- `p` キーが誤って `session_selected` への遷移にバインドされている（要修正）
+Pin はメモ単位で管理する。pin 中は編集は可能だが、位置移動・リサイズ・削除は不可とする。
 
-実装内容:
-- `Memo` に `isPinned: boolean` フィールドを追加
-- `memo_selected` または `editing` 状態のメモに対して `p` キーで `isPinned` をトグル
-- 右クリックメニューに `このメモを固定 / 固定を解除` を追加（セッション文脈メニューとは別に、選択メモに対する項目として扱う）
-- 固定メモは将来の auto close 対象外にする（Phase 4 で保証）
+`p` キーの動作:
+- `memo_selected` 状態: 対象メモの `isPinned` をトグル
+- `session_selected` 状態: スマートトグル（全メモが pinned なら全解除、それ以外は全 pin）
+- `editing` 状態: `p` はテキスト入力として扱う（pin トグルしない）
+
+pin による制限:
+- ドラッグ移動: 不可（個別ドラッグ・session drag ともにスキップ）
+- リサイズ: 不可
+- 削除: 不可（Delete キー無効、session 内に1枚でも pinned があれば session 削除不可）
+- 編集: 可能
+
+session drag における pinned メモの扱い:
+- pinned メモは session drag の対象から除外（その場に留まる）
+- 他の unpinned メモだけが移動する
 
 視覚表現:
-- 固定中は画鋲アイコンまたは `📌` 相当の小バッジを右上に表示（シンプルな実装でよい）
+- pin 中は右上に小バッジ（青丸）を表示
+
+将来の auto close との関係:
+- 固定メモは auto close 対象外にする（Phase 4 で保証）
 
 #### S-03: セッション単位の一括操作
 
@@ -171,9 +182,13 @@ Phase 3 では `isPinned` を持つことで将来の対象外フラグを準備
 
 Gate 条件:
 - `selection.type` が `none / memo / editing / session` の4種類のみ存在する
-- `p` キーが `memo` または `editing` 状態のとき `isPinned` をトグルする
-- `p` キーが `session` / `none` 状態では何も起きない
+- `p` キーが `memo_selected` のとき対象メモの `isPinned` をトグルする
+- `p` キーが `session_selected` のとき全メモをスマートトグルする
+- `p` キーが `editing` のときテキスト入力として扱う（pin トグルしない）
 - 固定中メモに視覚バッジが表示される
+- 固定中メモはドラッグ・リサイズ・削除ができない
+- ピッカー表示中は 1〜9 / Esc / Del 以外のキーをブロックする
+- ピッカーを開くと selection がクリアされる
 - Phase 3-2 の右クリックメニュー動作を壊していない
 - Phase 3-1 の全 Gate を壊していない
 
@@ -357,3 +372,4 @@ Phase 3-3 から着手可能。
 - 2026-04-08: 初版作成（骨組み計画）
 - 2026-04-08: 詳細計画へ更新（Phase 3-1 着手前）
 - 2026-04-08: Phase 3-1 / 3-2 完了を反映。A-01（グローバル Selection）・U-09（Pin / p キー修正）を追加。AI-Planning-Guidelines に準拠した構成へ全面改訂。
+- 2026-04-09: U-09 仕様を正規化。Pin はメモ単位管理、session p はスマートトグル、editing 中は p を入力として扱う。pin による制限（移動・リサイズ・削除不可）を明記。ピッカーのキーブロック仕様を Gate に追加。

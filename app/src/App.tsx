@@ -424,6 +424,7 @@ function App() {
       }),
       listen('session://open-picker', () => {
         setIsSessionPickerVisible(true)
+        setSelection({ type: 'none' })
       }),
       ...(import.meta.env.DEV
         ? [
@@ -679,6 +680,9 @@ function App() {
           setIsSessionPickerVisible(false)
           return
         }
+
+        // ピッカー表示中は他のキーをブロック
+        return
       }
 
       if (editingEntry) {
@@ -758,6 +762,7 @@ function App() {
       }
 
       if (selectedEntry && (event.key === 'Delete' || event.key === 'Backspace')) {
+        if (selectedEntry.memo.isPinned) return  // pin中は削除不可
         event.preventDefault()
         setDeleteConfirm({ type: 'memo', sessionId: selectedEntry.session.id, memoId: selectedEntry.memo.id })
         return
@@ -787,8 +792,28 @@ function App() {
           }
 
           if (event.key === 'Delete' || event.key === 'Backspace') {
+            // pin済みメモがあればセッション削除不可
+            const hasPinned = targetSession.memos.some((m) => m.isVisible && m.isPinned)
+            if (hasPinned) return
             event.preventDefault()
             setDeleteConfirm({ type: 'session', sessionId })
+            return
+          }
+
+          if (event.key === 'p') {
+            event.preventDefault()
+            // 全部 pinned なら全解除、それ以外は全 pin（スマートトグル）
+            const allPinned = targetSession.memos.every((m) => !m.isVisible || m.isPinned)
+            setSessions((currentSessions) =>
+              currentSessions.map((session) =>
+                session.id !== sessionId
+                  ? session
+                  : {
+                      ...session,
+                      memos: session.memos.map((m) => ({ ...m, isPinned: !allPinned })),
+                    },
+              ),
+            )
             return
           }
         }
@@ -882,7 +907,8 @@ function App() {
       // セッション選択中にそのセッション内のメモを触った → 一括ドラッグ
       if (selection.type === 'session' && selection.sessionId === sessionId) {
         const memoOrigins: Record<string, { x: number; y: number }> = {}
-        for (const m of targetSession.memos.filter((m) => m.isVisible)) {
+        // pinned メモは一括ドラッグから除外（その場に留まる）
+        for (const m of targetSession.memos.filter((m) => m.isVisible && !m.isPinned)) {
           memoOrigins[m.id] = { x: m.position.x, y: m.position.y }
         }
         interactionRef.current = {
@@ -896,6 +922,9 @@ function App() {
         dragExceededRef.current = false
         return
       }
+
+      // pin中のメモは個別ドラッグ不可
+      if (targetMemo.isPinned) return
 
       interactionRef.current = {
         type: 'drag',
@@ -979,7 +1008,7 @@ function App() {
 
       const targetSession = sessions.find((session) => session.id === sessionId)
       const targetMemo = targetSession?.memos.find((memo) => memo.id === memoId)
-      if (!targetMemo) {
+      if (!targetMemo || targetMemo.isPinned) {
         return
       }
 
