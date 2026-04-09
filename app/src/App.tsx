@@ -1,275 +1,43 @@
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
+import {
+  DEFAULT_HEIGHT,
+  DEFAULT_WIDTH,
+  DRAG_THRESHOLD,
+  MAX_HEIGHT,
+  MAX_OPEN_MEMOS,
+  MAX_OPEN_SESSIONS,
+  MAX_WIDTH,
+  MIN_HEIGHT,
+  MIN_WIDTH,
+  SESSION_COLOR_VARS,
+} from './constants/sticky'
+import {
+  buildSessionsFromRows,
+  findAvailableSlotIndices,
+  findUnusedColorSlot,
+  generateTitle,
+  getEditingEntry,
+  getOpenMemos,
+  getSelectedEntry,
+  getSlotPosition,
+  getOpenSessions,
+  nextId,
+} from './domain/sessionHelpers'
+import type {
+  ContextMenu,
+  DeleteConfirm,
+  Interaction,
+  Memo,
+  MemoPayload,
+  ResizeDirection,
+  Selection,
+  Session,
+  SessionPayload,
+  SessionRow,
+} from './types/sticky'
 import './App.css'
-
-const DRAG_THRESHOLD = 6
-const DEFAULT_WIDTH = 320
-const DEFAULT_HEIGHT = 240
-const MIN_WIDTH = 240
-const MIN_HEIGHT = 180
-const MAX_WIDTH = 520
-const MAX_HEIGHT = 420
-const MAX_OPEN_SESSIONS = 5
-const MAX_OPEN_MEMOS = 15
-
-const SESSION_COLOR_VARS = [
-  'var(--session-red)',
-  'var(--session-orange)',
-  'var(--session-yellow)',
-  'var(--session-green)',
-  'var(--session-blue)',
-]
-
-// x: 5列を画面中央に配置（240px刻み、カード幅320pxと80px重なる設計）
-// 1440px基準: 左端80px余白、右端80px余白、グリッド幅1280px
-// y: 3段、行間243px（カード高240px、ほぼ隙間なし）
-const SLOT_PERCENTAGES = [
-  { x: 0.17, y: 0.20 },
-  { x: 0.33, y: 0.20 },
-  { x: 0.50, y: 0.20 },
-  { x: 0.67, y: 0.20 },
-  { x: 0.83, y: 0.20 },
-  { x: 0.17, y: 0.47 },
-  { x: 0.33, y: 0.47 },
-  { x: 0.50, y: 0.47 },
-  { x: 0.67, y: 0.47 },
-  { x: 0.83, y: 0.47 },
-  { x: 0.17, y: 0.74 },
-  { x: 0.33, y: 0.74 },
-  { x: 0.50, y: 0.74 },
-  { x: 0.67, y: 0.74 },
-  { x: 0.83, y: 0.74 },
-]
-
-// グローバル選択状態 (A-01)
-type Selection =
-  | { type: 'none' }
-  | { type: 'memo';    sessionId: string; memoId: string }
-  | { type: 'editing'; sessionId: string; memoId: string }
-  | { type: 'session'; sessionId: string }
-
-type ResizeDirection = 'nw' | 'ne' | 'sw' | 'se'
-
-type Memo = {
-  id: string
-  content: string
-  savedContent: string
-  isPinned: boolean
-  isVisible: boolean
-  isDirty: boolean
-  position: { x: number; y: number }
-  size: { width: number; height: number }
-  slotIndex: number | null
-  editingKey: number
-}
-
-type Session = {
-  id: string
-  colorSlot: number
-  isOpen: boolean
-  memos: Memo[]
-}
-
-type DragInteraction = {
-  type: 'drag'
-  sessionId: string
-  memoId: string
-  startX: number
-  startY: number
-  originX: number
-  originY: number
-  active: boolean
-}
-
-type SessionDragInteraction = {
-  type: 'session-drag'
-  sessionId: string
-  startX: number
-  startY: number
-  memoOrigins: Record<string, { x: number; y: number }>
-  active: boolean
-}
-
-type ResizeInteraction = {
-  type: 'resize'
-  sessionId: string
-  memoId: string
-  direction: ResizeDirection
-  startX: number
-  startY: number
-  originX: number
-  originY: number
-  originWidth: number
-  originHeight: number
-}
-
-type Interaction = DragInteraction | SessionDragInteraction | ResizeInteraction
-
-type ContextMenu = {
-  sessionId: string
-  x: number
-  y: number
-} | null
-
-type DeleteConfirm =
-  | { type: 'session'; sessionId: string }
-  | { type: 'memo'; sessionId: string; memoId: string }
-  | null
-
-// ---- DB payload types (frontend → Rust) ----
-
-type SessionPayload = {
-  id: string
-  colorSlot: number
-  isOpen: boolean
-}
-
-type MemoPayload = {
-  id: string
-  sessionId: string
-  content: string
-  title: string
-  posX: number
-  posY: number
-  width: number
-  height: number
-  slotIndex: number | null
-  isOpen: boolean
-  isPinned: boolean
-}
-
-// DB から返される行型
-type MemoRow = {
-  id: string
-  sessionId: string
-  content: string
-  posX: number
-  posY: number
-  width: number
-  height: number
-  slotIndex: number | null
-  isOpen: boolean
-  isPinned: boolean
-}
-
-type SessionRow = {
-  id: string
-  colorSlot: number
-  isOpen: boolean
-  memos: MemoRow[]
-}
-
-// ---- DB helpers ----
-
-function generateTitle(content: string): string {
-  return content.slice(0, 10)
-}
-
-function buildSessionsFromRows(rows: SessionRow[]): Session[] {
-  return rows.map((row) => ({
-    id: row.id,
-    colorSlot: row.colorSlot,
-    isOpen: row.isOpen,
-    memos: row.memos.map((m) => ({
-      id: m.id,
-      content: m.content,
-      savedContent: m.content,
-      isPinned: m.isPinned,
-      isVisible: m.isOpen,
-      isDirty: false,
-      position: { x: m.posX, y: m.posY },
-      size: { width: m.width, height: m.height },
-      slotIndex: m.slotIndex,
-      editingKey: 0,
-    })),
-  }))
-}
-
-function nextId(prefix: string, current: number) {
-  return `${prefix}-${current.toString(36)}`
-}
-
-function getViewportSize() {
-  if (typeof window === 'undefined') {
-    return { width: 1440, height: 900 }
-  }
-
-  return {
-    width: window.innerWidth,
-    height: window.innerHeight,
-  }
-}
-
-function getSlotPosition(slotIndex: number) {
-  const { width, height } = getViewportSize()
-  const slot = SLOT_PERCENTAGES[slotIndex] ?? SLOT_PERCENTAGES[0]
-
-  return {
-    x: Math.round(Math.max(0, Math.min(width - DEFAULT_WIDTH, width * slot.x - DEFAULT_WIDTH / 2))),
-    y: Math.round(Math.max(0, Math.min(height - DEFAULT_HEIGHT, height * slot.y - DEFAULT_HEIGHT / 2))),
-  }
-}
-
-function getOpenSessions(sessions: Session[]) {
-  return sessions.filter((session) => session.isOpen)
-}
-
-function getOpenMemos(sessions: Session[]) {
-  return getOpenSessions(sessions).flatMap((session) =>
-    session.memos.filter((memo) => memo.isVisible),
-  )
-}
-
-function findUnusedColorSlot(sessions: Session[]) {
-  const usedSlots = new Set(getOpenSessions(sessions).map((session) => session.colorSlot))
-
-  for (let index = 0; index < SESSION_COLOR_VARS.length; index += 1) {
-    if (!usedSlots.has(index)) {
-      return index
-    }
-  }
-
-  return null
-}
-
-function findAvailableSlotIndices(sessions: Session[], count: number) {
-  const usedSlots = new Set(
-    getOpenMemos(sessions)
-      .map((memo) => memo.slotIndex)
-      .filter((slotIndex): slotIndex is number => slotIndex !== null),
-  )
-
-  const available: number[] = []
-
-  for (let index = 0; index < SLOT_PERCENTAGES.length; index += 1) {
-    if (!usedSlots.has(index)) {
-      available.push(index)
-    }
-
-    if (available.length === count) {
-      return available
-    }
-  }
-
-  return null
-}
-
-// Selection から編集中エントリを取得
-function getEditingEntry(selection: Selection, sessions: Session[]) {
-  if (selection.type !== 'editing') return null
-  const session = sessions.find((s) => s.id === selection.sessionId)
-  const memo = session?.memos.find((m) => m.id === selection.memoId)
-  return session && memo ? { session, memo } : null
-}
-
-// Selection からメモ選択エントリを取得
-function getSelectedEntry(selection: Selection, sessions: Session[]) {
-  if (selection.type !== 'memo') return null
-  const session = sessions.find((s) => s.id === selection.sessionId)
-  const memo = session?.memos.find((m) => m.id === selection.memoId)
-  return session && memo ? { session, memo } : null
-}
 
 function App() {
   const [clickThrough, setClickThrough] = useState(false)
