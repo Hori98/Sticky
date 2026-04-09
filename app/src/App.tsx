@@ -689,13 +689,6 @@ function App() {
         if (isSaveShortcut) {
           event.preventDefault()
           saveMemo(editingEntry.session.id, editingEntry.memo.id)
-          setSelection({ type: 'none' })
-          return
-        }
-
-        if (isCommitShortcut) {
-          event.preventDefault()
-          saveMemo(editingEntry.session.id, editingEntry.memo.id)
           setSessions((currentSessions) =>
             currentSessions.map((session) =>
               session.id !== editingEntry.session.id
@@ -717,6 +710,13 @@ function App() {
           return
         }
 
+        if (isCommitShortcut) {
+          event.preventDefault()
+          saveMemo(editingEntry.session.id, editingEntry.memo.id)
+          setSelection({ type: 'none' })
+          return
+        }
+
         if (event.key === 'Escape') {
           event.preventDefault()
           commitEditorValue(editingEntry.session.id, editingEntry.memo.id)
@@ -731,13 +731,6 @@ function App() {
       }
 
       if (selectedEntry && isSaveShortcut) {
-        event.preventDefault()
-        saveMemo(selectedEntry.session.id, selectedEntry.memo.id)
-        setSelection({ type: 'none' })
-        return
-      }
-
-      if (selectedEntry && isCommitShortcut) {
         event.preventDefault()
         saveMemo(selectedEntry.session.id, selectedEntry.memo.id)
         setSessions((currentSessions) =>
@@ -761,6 +754,13 @@ function App() {
         return
       }
 
+      if (selectedEntry && isCommitShortcut) {
+        event.preventDefault()
+        saveMemo(selectedEntry.session.id, selectedEntry.memo.id)
+        setSelection({ type: 'none' })
+        return
+      }
+
       if (selectedEntry && (event.key === 'Delete' || event.key === 'Backspace')) {
         if (selectedEntry.memo.isPinned) return  // pin中は削除不可
         event.preventDefault()
@@ -779,6 +779,7 @@ function App() {
             for (const memo of targetSession.memos) {
               if (memo.isDirty) saveMemo(sessionId, memo.id)
             }
+            handleCloseSession(sessionId)
             return
           }
 
@@ -787,7 +788,6 @@ function App() {
             for (const memo of targetSession.memos) {
               if (memo.isDirty) saveMemo(sessionId, memo.id)
             }
-            handleCloseSession(sessionId)
             return
           }
 
@@ -1176,7 +1176,7 @@ function App() {
                     <footer className="memo-card__footer">
                       <span>click: select / dbl: edit / right-click: session menu</span>
                       <span>p: pin / Del: delete confirm / Esc: deselect</span>
-                      <span>Cmd+S: save / Cmd+Enter: save+close</span>
+                      <span>Cmd+S: save+close / Cmd+Enter: save+stay</span>
                     </footer>
                   ) : null}
 
