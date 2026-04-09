@@ -14,6 +14,23 @@ import {
   SESSION_COLOR_VARS,
 } from './constants/sticky'
 import {
+  appendSession,
+  clearMemoSlotIndex,
+  clearSessionSlotIndices,
+  closeMemo,
+  closeSessionInState,
+  incrementMemoEditingKey,
+  moveMemo,
+  moveSessionMemos,
+  removeMemo,
+  removeSession,
+  resizeMemo,
+  toggleMemoPinnedState,
+  toggleSessionPinnedState,
+  updateMemoContent,
+  updateMemoDirtyState,
+} from './domain/sessionActions'
+import {
   buildSessionsFromRows,
   findAvailableSlotIndices,
   findUnusedColorSlot,
@@ -119,18 +136,12 @@ function App() {
     if (deleteConfirm.type === 'session') {
       await invoke('trash_session', { sessionId: deleteConfirm.sessionId })
       console.log('[DB] trash_session:', deleteConfirm.sessionId)
-      setSessions((prev) => prev.filter((s) => s.id !== deleteConfirm.sessionId))
+      setSessions((prev) => removeSession(prev, deleteConfirm.sessionId))
     } else {
       const { sessionId, memoId } = deleteConfirm
       await invoke('trash_memo', { memoId })
       console.log('[DB] trash_memo:', memoId)
-      setSessions((prev) =>
-        prev.map((s) =>
-          s.id !== sessionId
-            ? s
-            : { ...s, memos: s.memos.filter((m) => m.id !== memoId) },
-        ),
-      )
+      setSessions((prev) => removeMemo(prev, sessionId, memoId))
     }
     setSelection({ type: 'none' })
     setDeleteConfirm(null)
@@ -223,22 +234,10 @@ function App() {
     draftContentRef.current[memoId] = nextValue
 
     setSessions((currentSessions) =>
-      currentSessions.map((session) =>
-        session.id !== sessionId
-          ? session
-          : {
-              ...session,
-              memos: session.memos.map((memo) =>
-                memo.id !== memoId
-                  ? memo
-                  : {
-                      ...memo,
-                      content: nextValue,
-                      isDirty: nextValue !== memo.savedContent,
-                    },
-              ),
-            },
-      ),
+      updateMemoContent(currentSessions, sessionId, memoId, (_content, savedContent) => ({
+        content: nextValue,
+        isDirty: nextValue !== savedContent,
+      })),
     )
   }
 
@@ -248,23 +247,11 @@ function App() {
     draftContentRef.current[memoId] = nextValue
 
     setSessions((currentSessions) =>
-      currentSessions.map((session) =>
-        session.id !== sessionId
-          ? session
-          : {
-              ...session,
-              memos: session.memos.map((memo) =>
-                memo.id !== memoId
-                  ? memo
-                  : {
-                      ...memo,
-                      content: nextValue,
-                      savedContent: nextValue,
-                      isDirty: false,
-                    },
-              ),
-            },
-      ),
+      updateMemoContent(currentSessions, sessionId, memoId, () => ({
+        content: nextValue,
+        savedContent: nextValue,
+        isDirty: false,
+      })),
     )
   }
 
@@ -309,21 +296,13 @@ function App() {
     if (memoId) {
       // メモ単体を閉じる
       setSessions((prev) =>
-        prev.map((s) =>
-          s.id !== sessionId
-            ? s
-            : { ...s, memos: s.memos.map((m) => (m.id !== memoId ? m : { ...m, isVisible: false })) },
-        ),
+        closeMemo(prev, sessionId, memoId),
       )
     } else {
       // セッションを閉じる
       await invoke('close_session', { sessionId })
       setSessions((prev) =>
-        prev.map((s) =>
-          s.id !== sessionId
-            ? s
-            : { ...s, isOpen: false, memos: s.memos.map((m) => ({ ...m, isVisible: false })) },
-        ),
+        closeSessionInState(prev, sessionId),
       )
     }
     setSelection({ type: 'none' })
@@ -365,7 +344,7 @@ function App() {
     }
 
     const newSession = result.session
-    setSessions((prev) => [...prev, newSession])
+    setSessions((prev) => appendSession(prev, newSession))
     setSelection({ type: 'memo', sessionId: newSession.id, memoId: newSession.memos[0].id })
   })
 
@@ -435,34 +414,11 @@ function App() {
           interaction.active = true
           dragExceededRef.current = true
           // スロットを解放
-          setSessions((currentSessions) =>
-            currentSessions.map((session) =>
-              session.id !== interaction.sessionId
-                ? session
-                : {
-                    ...session,
-                    memos: session.memos.map((memo) => ({ ...memo, slotIndex: null })),
-                  },
-            ),
-          )
+          setSessions((currentSessions) => clearSessionSlotIndices(currentSessions, interaction.sessionId))
         }
 
         setSessions((currentSessions) =>
-          currentSessions.map((session) =>
-            session.id !== interaction.sessionId
-              ? session
-              : {
-                  ...session,
-                  memos: session.memos.map((memo) => {
-                    const origin = interaction.memoOrigins[memo.id]
-                    if (!origin) return memo
-                    return {
-                      ...memo,
-                      position: { x: origin.x + deltaX, y: origin.y + deltaY },
-                    }
-                  }),
-                },
-          ),
+          moveSessionMemos(currentSessions, interaction.sessionId, interaction.memoOrigins, deltaX, deltaY),
         )
         return
       }
@@ -481,42 +437,17 @@ function App() {
             dragExceededRef.current = true
 
             setSessions((currentSessions) =>
-              currentSessions.map((session) =>
-                session.id !== interaction.sessionId
-                  ? session
-                  : {
-                      ...session,
-                      memos: session.memos.map((memo) =>
-                        memo.id !== interaction.memoId
-                          ? memo
-                          : {
-                              ...memo,
-                              slotIndex: null,
-                            },
-                      ),
-                    },
-              ),
+              clearMemoSlotIndex(currentSessions, interaction.sessionId, interaction.memoId),
             )
           }
 
         setSessions((currentSessions) =>
-          currentSessions.map((session) =>
-            session.id !== interaction.sessionId
-              ? session
-              : {
-                  ...session,
-                  memos: session.memos.map((memo) =>
-                    memo.id !== interaction.memoId
-                      ? memo
-                      : {
-                          ...memo,
-                          position: {
-                            x: interaction.originX + deltaX,
-                            y: interaction.originY + deltaY,
-                          },
-                        },
-                  ),
-                },
+          moveMemo(
+            currentSessions,
+            interaction.sessionId,
+            interaction.memoId,
+            interaction.originX + deltaX,
+            interaction.originY + deltaY,
           ),
         )
         return
@@ -557,21 +488,14 @@ function App() {
       }
 
       setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id !== interaction.sessionId
-            ? session
-            : {
-                ...session,
-                memos: session.memos.map((memo) =>
-                  memo.id !== interaction.memoId
-                    ? memo
-                    : {
-                        ...memo,
-                        position: { x: nextX, y: nextY },
-                        size: { width: nextWidth, height: nextHeight },
-                      },
-                ),
-              },
+        resizeMemo(
+          currentSessions,
+          interaction.sessionId,
+          interaction.memoId,
+          nextX,
+          nextY,
+          nextWidth,
+          nextHeight,
         ),
       )
     }
@@ -660,7 +584,7 @@ function App() {
         }
 
         const newSession = result.session
-        setSessions((prev) => [...prev, newSession])
+        setSessions((prev) => appendSession(prev, newSession))
         setSelection({ type: 'memo', sessionId: newSession.id, memoId: newSession.memos[0].id })
         setIsSessionPickerVisible(false)
         return
@@ -743,14 +667,7 @@ function App() {
           event.preventDefault()
           const allPinned = targetSession.memos.every((m) => !m.isVisible || m.isPinned)
           setSessions((currentSessions) =>
-            currentSessions.map((session) =>
-              session.id !== sessionId
-                ? session
-                : {
-                    ...session,
-                    memos: session.memos.map((m) => ({ ...m, isPinned: !allPinned })),
-                  },
-            ),
+            toggleSessionPinnedState(currentSessions, sessionId, !allPinned),
           )
           return
         }
@@ -773,41 +690,14 @@ function App() {
     ) {
       const { sessionId, memoId } = selection
       event.preventDefault()
-      setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id !== sessionId
-            ? session
-            : {
-                ...session,
-                memos: session.memos.map((memo) =>
-                  memo.id !== memoId ? memo : { ...memo, isPinned: !memo.isPinned },
-                ),
-              },
-        ),
-      )
+      setSessions((currentSessions) => toggleMemoPinnedState(currentSessions, sessionId, memoId))
       return
     }
 
     if (selection.type === 'memo' && event.key === 'Enter') {
       const { sessionId, memoId } = selection
       event.preventDefault()
-      setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id !== sessionId
-            ? session
-            : {
-                ...session,
-                memos: session.memos.map((memo) =>
-                  memo.id !== memoId
-                    ? memo
-                    : {
-                        ...memo,
-                        editingKey: memo.editingKey + 1,
-                      },
-                ),
-              },
-        ),
-      )
+      setSessions((currentSessions) => incrementMemoEditingKey(currentSessions, sessionId, memoId))
       setSelection({ type: 'editing', sessionId, memoId })
     }
   })
@@ -900,23 +790,7 @@ function App() {
 
       event.stopPropagation()
 
-      setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id !== sessionId
-            ? session
-            : {
-                ...session,
-                memos: session.memos.map((memo) =>
-                  memo.id !== memoId
-                    ? memo
-                    : {
-                        ...memo,
-                        editingKey: memo.editingKey + 1,
-                      },
-                ),
-              },
-        ),
-      )
+      setSessions((currentSessions) => incrementMemoEditingKey(currentSessions, sessionId, memoId))
       setSelection({ type: 'editing', sessionId, memoId })
     }
 
@@ -967,23 +841,7 @@ function App() {
       }
       dragExceededRef.current = true
 
-      setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id !== sessionId
-            ? session
-            : {
-                ...session,
-                memos: session.memos.map((memo) =>
-                  memo.id !== memoId
-                    ? memo
-                    : {
-                        ...memo,
-                        slotIndex: null,
-                      },
-                ),
-              },
-        ),
-      )
+      setSessions((currentSessions) => clearMemoSlotIndex(currentSessions, sessionId, memoId))
       setSelection({ type: 'memo', sessionId, memoId })
     }
 
@@ -1059,21 +917,7 @@ function App() {
                             draftContentRef.current[memo.id] = nextValue
 
                             setSessions((currentSessions) =>
-                              currentSessions.map((currentSession) =>
-                                currentSession.id !== session.id
-                                  ? currentSession
-                                  : {
-                                      ...currentSession,
-                                      memos: currentSession.memos.map((currentMemo) =>
-                                        currentMemo.id !== memo.id
-                                          ? currentMemo
-                                          : {
-                                              ...currentMemo,
-                                              isDirty: nextValue !== currentMemo.savedContent,
-                                            },
-                                      ),
-                                    },
-                              ),
+                              updateMemoDirtyState(currentSessions, session.id, memo.id, nextValue),
                             )
                           }
                         }}
@@ -1085,21 +929,7 @@ function App() {
                           draftContentRef.current[memo.id] = nextValue
 
                           setSessions((currentSessions) =>
-                            currentSessions.map((currentSession) =>
-                              currentSession.id !== session.id
-                                ? currentSession
-                                : {
-                                    ...currentSession,
-                                    memos: currentSession.memos.map((currentMemo) =>
-                                      currentMemo.id !== memo.id
-                                        ? currentMemo
-                                        : {
-                                            ...currentMemo,
-                                            isDirty: nextValue !== currentMemo.savedContent,
-                                          },
-                                    ),
-                                  },
-                            ),
+                            updateMemoDirtyState(currentSessions, session.id, memo.id, nextValue),
                           )
                         }}
                         onBlur={() => commitEditorValue(session.id, memo.id)}
@@ -1258,7 +1088,7 @@ function App() {
                       return
                     }
                     const newSession = result.session
-                    setSessions((prev) => [...prev, newSession])
+                    setSessions((prev) => appendSession(prev, newSession))
                     setSelection({ type: 'memo', sessionId: newSession.id, memoId: newSession.memos[0].id })
                     setIsSessionPickerVisible(false)
                   }}
