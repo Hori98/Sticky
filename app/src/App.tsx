@@ -291,9 +291,18 @@ function App() {
   const cardRefs = useRef<Record<string, HTMLElement | null>>({})
   const sessionPickerRef = useRef<HTMLDivElement | null>(null)
 
-  // 常に最新の sessions を保持（useEffect([], []) 内のリスナーから参照するため）
+  // 常に最新の値を保持（keydown useEffect の stale closure を防ぐ）
   const sessionsRef = useRef<Session[]>([])
   sessionsRef.current = sessions
+  const selectionRef = useRef<Selection>({ type: 'none' })
+  selectionRef.current = selection
+  const deleteConfirmRef = useRef<DeleteConfirm>(null)
+  deleteConfirmRef.current = deleteConfirm
+  const handleDeleteConfirmedRef = useRef<() => void>(() => {})
+  const isComposingRef = useRef(false)
+  isComposingRef.current = isComposing
+  const isSessionPickerVisibleRef = useRef(false)
+  isSessionPickerVisibleRef.current = isSessionPickerVisible
 
   const getMemoIdentity = (sessionId: string, memoId: string) => `${sessionId}:${memoId}`
   const openMemoCount = getOpenMemos(sessions).length
@@ -343,6 +352,7 @@ function App() {
   }
 
   const handleDeleteConfirmed = async () => {
+    const deleteConfirm = deleteConfirmRef.current
     if (!deleteConfirm) return
     if (deleteConfirm.type === 'session') {
       await invoke('trash_session', { sessionId: deleteConfirm.sessionId })
@@ -363,6 +373,7 @@ function App() {
     setSelection({ type: 'none' })
     setDeleteConfirm(null)
   }
+  handleDeleteConfirmedRef.current = handleDeleteConfirmed
 
   const createMemo = (slotIndex: number): Memo => {
     const memoId = nextId('memo', idCounterRef.current.memo++)
@@ -799,6 +810,11 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      const selection            = selectionRef.current
+      const sessions             = sessionsRef.current
+      const deleteConfirm        = deleteConfirmRef.current
+      const isComposing          = isComposingRef.current
+      const isSessionPickerVisible = isSessionPickerVisibleRef.current
       const editingEntry = getEditingEntry(selection, sessions)
       const selectedEntry = getSelectedEntry(selection, sessions)
 
@@ -809,7 +825,7 @@ function App() {
       if (deleteConfirm !== null) {
         if (event.key === 'Enter' || event.key === 'Delete' || event.key === 'Backspace') {
           event.preventDefault()
-          handleDeleteConfirmed()
+          handleDeleteConfirmedRef.current()
           return
         }
         if (event.key === 'Escape') {
@@ -1003,7 +1019,7 @@ function App() {
     // capture: true で textarea より先に処理し、Cmd+Enter などが textarea に取られるのを防ぐ
     window.addEventListener('keydown', handleKeyDown, { capture: true })
     return () => window.removeEventListener('keydown', handleKeyDown, { capture: true })
-  }, [isComposing, sessions, isSessionPickerVisible, selection, deleteConfirm])
+  }, [])  // ref 経由で常に最新値を参照するため deps 不要
 
   const handleMemoPointerDown =
     (sessionId: string, memoId: string) => (event: React.PointerEvent<HTMLElement>) => {
