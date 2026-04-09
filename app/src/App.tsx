@@ -484,7 +484,7 @@ function App() {
         isOpen: session.isOpen,
       }
       await invoke('upsert_session', { session: sp })
-      for (const memo of session.memos.filter((m) => m.isVisible)) {
+      for (const memo of session.memos.filter((m) => m.isVisible && m.content !== '')) {
         const mp: MemoPayload = {
           id: memo.id,
           sessionId: session.id,
