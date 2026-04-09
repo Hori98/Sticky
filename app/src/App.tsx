@@ -346,10 +346,12 @@ function App() {
     if (!deleteConfirm) return
     if (deleteConfirm.type === 'session') {
       await invoke('trash_session', { sessionId: deleteConfirm.sessionId })
+      console.log('[DB] trash_session:', deleteConfirm.sessionId)
       setSessions((prev) => prev.filter((s) => s.id !== deleteConfirm.sessionId))
     } else {
       const { sessionId, memoId } = deleteConfirm
       await invoke('trash_memo', { memoId })
+      console.log('[DB] trash_memo:', memoId)
       setSessions((prev) =>
         prev.map((s) =>
           s.id !== sessionId
@@ -473,7 +475,9 @@ function App() {
   // ---- DB 保存経路 ----
 
   const saveSessions = async (targetSessions: Session[]) => {
-    for (const session of targetSessions.filter((s) => s.isOpen)) {
+    const open = targetSessions.filter((s) => s.isOpen)
+    console.log('[DB] saveSessions: sessions=', open.map((s) => s.id))
+    for (const session of open) {
       const sp: SessionPayload = {
         id: session.id,
         colorSlot: session.colorSlot,
@@ -495,8 +499,10 @@ function App() {
           isPinned: memo.isPinned,
         }
         await invoke('upsert_memo', { memo: mp })
+        console.log('[DB] upsert_memo:', mp.id, 'title=', mp.title, 'content=', mp.content.slice(0, 20))
       }
     }
+    console.log('[DB] saveSessions done')
   }
 
   // Cmd+S: 保存して閉じる
@@ -539,10 +545,12 @@ function App() {
     ;(async () => {
       try {
         await invoke('startup_cleanup')
+        console.log('[DB] startup_cleanup done')
         const rows = await invoke<SessionRow[]>('load_sessions')
+        console.log('[DB] load_sessions:', rows.length, 'sessions')
         setSessions(buildSessionsFromRows(rows))
       } catch (e) {
-        console.error('startup failed:', e)
+        console.error('[DB] startup failed:', e)
       }
     })()
   }, [])
