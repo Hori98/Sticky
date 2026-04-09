@@ -26,6 +26,7 @@ export async function trashMemoInDb(memoId: string) {
 
 export async function closeSessionInDb(sessionId: string) {
   await invoke('close_session', { sessionId })
+  console.log('[DB] close_session:', sessionId)
 }
 
 function buildSessionPayload(session: Session): SessionPayload {
@@ -59,6 +60,14 @@ export async function saveSessionsToDb(targetSessions: Session[]) {
   for (const session of openSessions) {
     const sessionPayload = buildSessionPayload(session)
     await invoke('upsert_session', { session: sessionPayload })
+    console.log(
+      '[DB] upsert_session:',
+      sessionPayload.id,
+      'colorSlot=',
+      sessionPayload.colorSlot,
+      'isOpen=',
+      sessionPayload.isOpen,
+    )
 
     for (const memo of session.memos.filter((currentMemo) => currentMemo.isVisible && currentMemo.content !== '')) {
       const memoPayload = buildMemoPayload(session.id, memo)
