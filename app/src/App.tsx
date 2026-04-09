@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { listen } from '@tauri-apps/api/event'
+import { invoke } from '@tauri-apps/api/core'
 import './App.css'
 
 const DRAG_THRESHOLD = 6
@@ -115,6 +116,75 @@ type DeleteConfirm =
   | { type: 'session'; sessionId: string }
   | { type: 'memo'; sessionId: string; memoId: string }
   | null
+
+// ---- DB payload types (frontend → Rust) ----
+
+type SessionPayload = {
+  id: string
+  colorSlot: number
+  isOpen: boolean
+}
+
+type MemoPayload = {
+  id: string
+  sessionId: string
+  content: string
+  title: string
+  posX: number
+  posY: number
+  width: number
+  height: number
+  slotIndex: number | null
+  isOpen: boolean
+  isPinned: boolean
+}
+
+// DB から返される行型
+type MemoRow = {
+  id: string
+  sessionId: string
+  content: string
+  posX: number
+  posY: number
+  width: number
+  height: number
+  slotIndex: number | null
+  isOpen: boolean
+  isPinned: boolean
+}
+
+type SessionRow = {
+  id: string
+  colorSlot: number
+  isOpen: boolean
+  memos: MemoRow[]
+}
+
+// ---- DB helpers ----
+
+function generateTitle(content: string): string {
+  return content.slice(0, 10)
+}
+
+function buildSessionsFromRows(rows: SessionRow[]): Session[] {
+  return rows.map((row) => ({
+    id: row.id,
+    colorSlot: row.colorSlot,
+    isOpen: row.isOpen,
+    memos: row.memos.map((m) => ({
+      id: m.id,
+      content: m.content,
+      savedContent: m.content,
+      isPinned: m.isPinned,
+      isVisible: m.isOpen,
+      isDirty: false,
+      position: { x: m.posX, y: m.posY },
+      size: { width: m.width, height: m.height },
+      slotIndex: m.slotIndex,
+      editingKey: 0,
+    })),
+  }))
+}
 
 function nextId(prefix: string, current: number) {
   return `${prefix}-${current.toString(36)}`
@@ -272,26 +342,23 @@ function App() {
     setContextMenu(null)
   }
 
-  const handleDeleteConfirmed = () => {
+  const handleDeleteConfirmed = async () => {
     if (!deleteConfirm) return
     if (deleteConfirm.type === 'session') {
-      handleCloseSession(deleteConfirm.sessionId)
+      await invoke('trash_session', { sessionId: deleteConfirm.sessionId })
+      setSessions((prev) => prev.filter((s) => s.id !== deleteConfirm.sessionId))
     } else {
       const { sessionId, memoId } = deleteConfirm
-      setSessions((currentSessions) =>
-        currentSessions.map((session) =>
-          session.id !== sessionId
-            ? session
-            : {
-                ...session,
-                memos: session.memos.map((memo) =>
-                  memo.id !== memoId ? memo : { ...memo, isVisible: false },
-                ),
-              },
+      await invoke('trash_memo', { memoId })
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id !== sessionId
+            ? s
+            : { ...s, memos: s.memos.filter((m) => m.id !== memoId) },
         ),
       )
-      setSelection({ type: 'none' })
     }
+    setSelection({ type: 'none' })
     setDeleteConfirm(null)
   }
 
@@ -402,6 +469,83 @@ function App() {
       ),
     )
   }
+
+  // ---- DB 保存経路 ----
+
+  const saveSessions = async (targetSessions: Session[]) => {
+    for (const session of targetSessions.filter((s) => s.isOpen)) {
+      const sp: SessionPayload = {
+        id: session.id,
+        colorSlot: session.colorSlot,
+        isOpen: session.isOpen,
+      }
+      await invoke('upsert_session', { session: sp })
+      for (const memo of session.memos.filter((m) => m.isVisible)) {
+        const mp: MemoPayload = {
+          id: memo.id,
+          sessionId: session.id,
+          content: memo.content,
+          title: generateTitle(memo.content),
+          posX: memo.position.x,
+          posY: memo.position.y,
+          width: memo.size.width,
+          height: memo.size.height,
+          slotIndex: memo.slotIndex,
+          isOpen: memo.isVisible,
+          isPinned: memo.isPinned,
+        }
+        await invoke('upsert_memo', { memo: mp })
+      }
+    }
+  }
+
+  // Cmd+S: 保存して閉じる
+  const handleSaveAndClose = async (sessionId: string, memoId?: string) => {
+    // saveMemo で state を最新化してから saveSessions で DB へ書き込む
+    if (memoId) saveMemo(sessionId, memoId)
+    await saveSessions(sessionsRef.current)
+    if (memoId) {
+      // メモ単体を閉じる
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id !== sessionId
+            ? s
+            : { ...s, memos: s.memos.map((m) => (m.id !== memoId ? m : { ...m, isVisible: false })) },
+        ),
+      )
+    } else {
+      // セッションを閉じる
+      await invoke('close_session', { sessionId })
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id !== sessionId
+            ? s
+            : { ...s, isOpen: false, memos: s.memos.map((m) => ({ ...m, isVisible: false })) },
+        ),
+      )
+    }
+    setSelection({ type: 'none' })
+  }
+
+  // Cmd+Enter: 保存して表示継続
+  const handleSaveAndStay = async (sessionId: string, memoId?: string) => {
+    if (memoId) saveMemo(sessionId, memoId)
+    await saveSessions(sessionsRef.current)
+    setSelection({ type: 'none' })
+  }
+
+  // 起動時: DB クリーンアップ → セッションロード
+  useEffect(() => {
+    ;(async () => {
+      try {
+        await invoke('startup_cleanup')
+        const rows = await invoke<SessionRow[]>('load_sessions')
+        setSessions(buildSessionsFromRows(rows))
+      } catch (e) {
+        console.error('startup failed:', e)
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     const unlisten = Promise.all([
@@ -629,6 +773,22 @@ function App() {
     }
   }, [])
 
+  // autosave: 5分ごとに isDirty なセッションを保存
+  useEffect(() => {
+    const AUTOSAVE_INTERVAL = 5 * 60 * 1000
+    const id = setInterval(async () => {
+      const current = sessionsRef.current
+      const hasDirty = current.some((s) => s.isOpen && s.memos.some((m) => m.isVisible && m.isDirty))
+      if (!hasDirty) return
+      try {
+        await saveSessions(current)
+      } catch (e) {
+        console.error('autosave failed:', e)
+      }
+    }, AUTOSAVE_INTERVAL)
+    return () => clearInterval(id)
+  }, [])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const editingEntry = getEditingEntry(selection, sessions)
@@ -688,32 +848,13 @@ function App() {
       if (editingEntry) {
         if (isSaveShortcut) {
           event.preventDefault()
-          saveMemo(editingEntry.session.id, editingEntry.memo.id)
-          setSessions((currentSessions) =>
-            currentSessions.map((session) =>
-              session.id !== editingEntry.session.id
-                ? session
-                : {
-                    ...session,
-                    memos: session.memos.map((memo) =>
-                      memo.id !== editingEntry.memo.id
-                        ? memo
-                        : {
-                            ...memo,
-                            isVisible: false,
-                          },
-                    ),
-                  },
-            ),
-          )
-          setSelection({ type: 'none' })
+          handleSaveAndClose(editingEntry.session.id, editingEntry.memo.id)
           return
         }
 
         if (isCommitShortcut) {
           event.preventDefault()
-          saveMemo(editingEntry.session.id, editingEntry.memo.id)
-          setSelection({ type: 'none' })
+          handleSaveAndStay(editingEntry.session.id, editingEntry.memo.id)
           return
         }
 
@@ -732,32 +873,13 @@ function App() {
 
       if (selectedEntry && isSaveShortcut) {
         event.preventDefault()
-        saveMemo(selectedEntry.session.id, selectedEntry.memo.id)
-        setSessions((currentSessions) =>
-          currentSessions.map((session) =>
-            session.id !== selectedEntry.session.id
-              ? session
-              : {
-                  ...session,
-                  memos: session.memos.map((memo) =>
-                    memo.id !== selectedEntry.memo.id
-                      ? memo
-                      : {
-                          ...memo,
-                          isVisible: false,
-                        },
-                  ),
-                },
-          ),
-        )
-        setSelection({ type: 'none' })
+        handleSaveAndClose(selectedEntry.session.id, selectedEntry.memo.id)
         return
       }
 
       if (selectedEntry && isCommitShortcut) {
         event.preventDefault()
-        saveMemo(selectedEntry.session.id, selectedEntry.memo.id)
-        setSelection({ type: 'none' })
+        handleSaveAndStay(selectedEntry.session.id, selectedEntry.memo.id)
         return
       }
 
@@ -776,18 +898,13 @@ function App() {
         if (targetSession) {
           if (isSaveShortcut) {
             event.preventDefault()
-            for (const memo of targetSession.memos) {
-              if (memo.isDirty) saveMemo(sessionId, memo.id)
-            }
-            handleCloseSession(sessionId)
+            handleSaveAndClose(sessionId)
             return
           }
 
           if (isCommitShortcut) {
             event.preventDefault()
-            for (const memo of targetSession.memos) {
-              if (memo.isDirty) saveMemo(sessionId, memo.id)
-            }
+            handleSaveAndStay(sessionId)
             return
           }
 
