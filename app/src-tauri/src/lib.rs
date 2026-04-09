@@ -4,6 +4,8 @@ use tauri::{Emitter, Manager};
 use tauri::{PhysicalPosition, PhysicalSize};
 #[cfg(desktop)]
 use serde::Serialize;
+#[cfg(desktop)]
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 
 #[cfg(desktop)]
 #[derive(Clone, Copy, Serialize)]
@@ -75,6 +77,33 @@ pub fn run() {
                 #[cfg(desktop)]
                 {
                     app.manage(OverlayState::default());
+
+                    // メニューバー構築 (Phase 3-5)
+                    let menu = Menu::with_items(app, &[
+                        &Submenu::with_items(app, "sticky", true, &[
+                            &MenuItem::with_id(app, "new-session", "New 1-Note Session", true, None::<&str>)?,
+                            &PredefinedMenuItem::separator(app)?,
+                            &MenuItem::with_id(app, "open-home", "Open Home", false, None::<&str>)?,
+                            &MenuItem::with_id(app, "open-trash", "Open Trash", false, None::<&str>)?,
+                            &MenuItem::with_id(app, "open-settings", "Open Settings", false, None::<&str>)?,
+                            &PredefinedMenuItem::separator(app)?,
+                            &PredefinedMenuItem::quit(app, Some("Quit sticky"))?,
+                        ])?,
+                    ])?;
+                    app.set_menu(menu)?;
+
+                    app.on_menu_event(|app, event| {
+                        match event.id().as_ref() {
+                            "new-session" => {
+                                if let Some(window) = app.get_webview_window("main") {
+                                    let _ = window.show();
+                                    let _ = window.set_focus();
+                                }
+                                let _ = app.emit("session://open-single", true);
+                            }
+                            _ => {}
+                        }
+                    });
 
                     let window = app
                         .get_webview_window("main")
