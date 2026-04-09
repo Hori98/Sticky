@@ -90,6 +90,10 @@ function App() {
 
   const getMemoIdentity = (sessionId: string, memoId: string) => `${sessionId}:${memoId}`
   const openMemoCount = getOpenMemos(sessions).length
+  const overlayModeLabel = clickThrough ? 'through' : 'overlay'
+  const overlayModeHint = clickThrough
+    ? 'Cmd+Opt+/ to return'
+    : 'Click or press Cmd+Opt+/'
 
   const triggerLimitWarning = (kind: 'session' | 'memo') => {
     if (limitWarningTimerRef.current !== null) {
@@ -1098,19 +1102,23 @@ function App() {
         </div>
       ) : null}
 
-      {import.meta.env.DEV ? (
-        <aside
-          className="runtime-badge"
-          onClick={() => {
-            const nextMode =
-              overlayInputMode === 'interactive' ? 'pass-through' : 'interactive'
-            void applyOverlayInputMode(nextMode)
-          }}
-        >
-          <span className="runtime-badge__dot" />
-          <span>{clickThrough ? 'through' : 'overlay'}</span>
-        </aside>
-      ) : null}
+      <button
+        type="button"
+        className={`overlay-mode-toggle ${clickThrough ? 'overlay-mode-toggle--through' : ''}`}
+        aria-pressed={clickThrough}
+        aria-label={`Overlay mode: ${overlayModeLabel}`}
+        onClick={() => {
+          const nextMode =
+            overlayInputMode === 'interactive' ? 'pass-through' : 'interactive'
+          void applyOverlayInputMode(nextMode)
+        }}
+      >
+        <span className="overlay-mode-toggle__dot" />
+        <span className="overlay-mode-toggle__content">
+          <span className="overlay-mode-toggle__label">{overlayModeLabel}</span>
+          <span className="overlay-mode-toggle__hint">{overlayModeHint}</span>
+        </span>
+      </button>
     </main>
   )
 }

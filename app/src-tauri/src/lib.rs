@@ -381,7 +381,6 @@ pub fn run() {
                             return;
                         }
 
-                        #[cfg(debug_assertions)]
                         if shortcut == &toggle_clickthrough {
                             let enabled = window
                                 .state::<OverlayState>()
@@ -390,6 +389,10 @@ pub fn run() {
 
                             let _ = window.set_ignore_cursor_events(enabled);
                             let _ = app.emit("overlay://clickthrough", enabled);
+                            if !enabled {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                 })
@@ -461,7 +464,6 @@ pub fn run() {
 
                     app.global_shortcut().register(open_single_session)?;
                     app.global_shortcut().register(open_session_picker)?;
-                    #[cfg(debug_assertions)]
                     app.global_shortcut().register(toggle_clickthrough)?;
                 }
 
